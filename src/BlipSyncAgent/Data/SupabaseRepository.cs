@@ -99,5 +99,62 @@ public class SupabaseRepository : IDisposable {
         }
     }
 
+    // ─── Forensic logging hooks ─────────────────────────────────────
+    public async Task<Guid> StartSyncRunAsync(string mode, string runner, string? workflowRunId, Guid? requestId) {
+        const string sql = @"
+            insert into dooh.sync_runs (mode, runner, workflow_run_id, request_id, status, started_at)
+            values (@mode, @runner, @wfid, @rid, 'running', now())
+            returning id;";
+        return await _conn.ExecuteScalarAsync<Guid>(sql, new {
+            mode, runner, wfid = workflowRunId, rid = (object?)requestId ?? DBNull.Value
+        });
+    }
+    public async Task FinishSyncRunAsync(Guid runId, string status, string? error, int rowsUpserted, object? manifest) {
+        const string sql = @"
+            update dooh.sync_runs
+               set status = @status,
+                   error_message = @error,
+                   finished_at = now(),
+                   duration_ms = (extract(epoch from (now() - started_at)) * 1000)::int,
+                   rows_upserted = @rows,
+                   manifest = @manifest::jsonb
+             where id = @id;";
+        await _conn.ExecuteAsync(sql, new {
+            id = runId, status, error,
+            rows = rowsUpserted,
+            manifest = JsonSerializer.Serialize(manifest ?? new {})
+        });
+    }
+    public async Task LogEventAsync(Guid runId, string level, string phase, string component, string message, object? payload = null) {
+        const string sql = @"
+            insert into dooh.sync_events (run_id, level, phase, component, message, payload)
+            values (@rid, @lvl, @phase, @comp, @msg, @payload::jsonb);";
+        await _conn.ExecuteAsync(sql, new {
+            rid = runId, lvl = level, phase, comp = component, msg = message,
+            payload = JsonSerializer.Serialize(payload ?? new {})
+        });
+    }
+    public async Task UpsertBoardStatusAsync(string signId, string state, string? errorText) {
+        const string sql = @"
+            insert into dooh.board_status (sign_id, state, last_seen_at, last_successful_sync_at, error_text, updated_at)
+            values (@id, @state, now(), case when @state = 'ok' then now() else null end, @err, now())
+            on conflict (sign_id) do update set
+                state = excluded.state,
+                last_seen_at = excluded.last_seen_at,
+                last_successful_sync_at = coalesce(excluded.last_successful_sync_at, dooh.board_status.last_successful_sync_at),
+                error_text = excluded.error_text,
+                updated_at = excluded.updated_at;";
+        await _conn.ExecuteAsync(sql, new { id = signId, state, err = errorText });
+    }
+    public async Task OpenIncidentAsync(string kind, string severity, string? subjectId, string summary, object? detail = null) {
+        const string sql = @"
+            insert into dooh.platform_incidents (kind, severity, subject_id, summary, detail)
+            values (@kind, @sev, @sid, @summary, @detail::jsonb);";
+        await _conn.ExecuteAsync(sql, new {
+            kind, sev = severity, sid = subjectId, summary,
+            detail = JsonSerializer.Serialize(detail ?? new {})
+        });
+    }
+
     public void Dispose() { try { _conn.Close(); } catch { } _conn.Dispose(); }
 }

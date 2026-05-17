@@ -4,43 +4,52 @@ using BlipSyncAgent.Data;
 
 try {
     var cfg = new Config();
-    Console.WriteLine($"[BlipSyncAgent] start  slug={cfg.BlipOperatorSlug}  user={cfg.BlipUsername}");
+    var workflowRunId = Environment.GetEnvironmentVariable("GITHUB_RUN_ID");
+    var runnerKind    = string.IsNullOrEmpty(workflowRunId) ? "local" : "github-actions";
+    Console.WriteLine($"[BlipSyncAgent] start  slug={cfg.BlipOperatorSlug}  runner={runnerKind}  wfRun={workflowRunId}");
 
     using var repo = new SupabaseRepository(cfg.PostgresConnectionString);
 
-    // Drain ALL pending requests this invocation. If none, also run a free incremental
-    // sync to keep data fresh on the 1-minute cadence.
+    async Task RunOnePassAsync(string mode, Guid? requestId) {
+        var runId = await repo.StartSyncRunAsync(mode, runnerKind, workflowRunId, requestId);
+        await repo.LogEventAsync(runId, "info", "init", "agent", $"pass started mode={mode}");
+        int rows = 0;
+        try {
+            using var blip = new BlipSession(cfg);
+            await repo.LogEventAsync(runId, "info", "login", "agent", "browser launched");
+            await blip.LoginAsync();
+            await repo.LogEventAsync(runId, "info", "login", "agent", "login complete");
+            var proc = new SyncProcessor(repo);
+            var manifest = await proc.RunWithForensicsAsync(blip, mode, runId);
+            rows = manifest.RowsUpserted;
+            await repo.LogEventAsync(runId, "info", "finalize", "agent", "pass completed", manifest);
+            await repo.FinishSyncRunAsync(runId, "succeeded", null, rows, manifest);
+        } catch (Exception ex) {
+            await repo.LogEventAsync(runId, "error", "fatal", "agent", ex.Message, new { stack = ex.ToString() });
+            await repo.FinishSyncRunAsync(runId, "failed", ex.Message, rows, null);
+            await repo.OpenIncidentAsync("sync.failed", "critical", runId.ToString(), $"Sync run failed: {ex.Message}", new { runId, mode });
+            throw;
+        }
+    }
+
     int processed = 0;
-    Guid? lastClaimedId = null;
     while (true) {
         var claimed = await repo.ClaimNextPendingAsync();
         if (claimed == null) break;
-        var (id, mode) = claimed.Value;
-        Console.WriteLine($"[BlipSyncAgent] claimed sync_request id={id} mode={mode}");
-        lastClaimedId = id;
-
+        var (reqId, mode) = claimed.Value;
+        Console.WriteLine($"[BlipSyncAgent] claimed sync_request id={reqId} mode={mode}");
         try {
-            using var blip = new BlipSession(cfg);
-            await blip.LoginAsync();
-            var proc = new SyncProcessor(repo);
-            if (mode == "full") await proc.RunFullSyncAsync(blip);
-            else                await proc.RunIncrementalSyncAsync(blip);
-            await repo.MarkCompletedAsync(id);
+            await RunOnePassAsync(mode, reqId);
+            await repo.MarkCompletedAsync(reqId);
             processed++;
         } catch (Exception ex) {
-            Console.Error.WriteLine($"[BlipSyncAgent] sync failed id={id}: {ex.Message}");
-            await repo.MarkCompletedAsync(id, error: ex.ToString());
+            await repo.MarkCompletedAsync(reqId, error: ex.ToString());
         }
     }
 
     if (processed == 0) {
-        // No queued button-clicks. Run an unconditional incremental sync to satisfy the
-        // every-1-minute freshness goal.
-        Console.WriteLine("[BlipSyncAgent] no pending requests — running heartbeat incremental sync");
-        using var blip = new BlipSession(cfg);
-        await blip.LoginAsync();
-        var proc = new SyncProcessor(repo);
-        await proc.RunIncrementalSyncAsync(blip);
+        // Heartbeat: every Actions invocation still does an incremental sync so cadence holds.
+        await RunOnePassAsync("heartbeat", null);
     }
 
     Console.WriteLine($"[BlipSyncAgent] done. processed={processed}");
