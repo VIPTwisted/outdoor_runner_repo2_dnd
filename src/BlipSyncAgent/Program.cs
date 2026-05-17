@@ -104,19 +104,49 @@ static string ConvertPostgresUriToNpgsqlConnectionString(string postgresUri) {
         throw new InvalidOperationException("POSTGRES_CONNECTION_STRING URI is missing a username.");
     }
 
+    var host = uri.Host;
+    var port = uri.IsDefaultPort ? 5432 : uri.Port;
+    NormalizeSupabasePoolerEndpoint(uri, ref host, ref port, ref username);
+
     var database = Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/'));
     var builder = new NpgsqlConnectionStringBuilder {
-        Host = uri.Host,
-        Port = uri.IsDefaultPort ? 5432 : uri.Port,
+        Host = host,
+        Port = port,
         Database = string.IsNullOrWhiteSpace(database) ? "postgres" : database,
         Username = username,
         Password = password,
-        SslMode = SslMode.Require,
-        TrustServerCertificate = true
+        SslMode = SslMode.Require
     };
 
     ApplyUriQueryOptions(uri.Query, builder);
     return builder.ConnectionString;
+}
+
+static void NormalizeSupabasePoolerEndpoint(Uri uri, ref string host, ref int port, ref string username) {
+    const string directHostPrefix = "db.";
+    const string directHostSuffix = ".supabase.co";
+    const string poolerHost = "aws-0-us-east-1.pooler.supabase.com";
+
+    if (port != 6543 ||
+        !host.StartsWith(directHostPrefix, StringComparison.OrdinalIgnoreCase) ||
+        !host.EndsWith(directHostSuffix, StringComparison.OrdinalIgnoreCase)) {
+        return;
+    }
+
+    var projectRefStart = directHostPrefix.Length;
+    var projectRefLength = host.Length - directHostPrefix.Length - directHostSuffix.Length;
+    if (projectRefLength <= 0) {
+        throw new InvalidOperationException("POSTGRES_CONNECTION_STRING uses Supabase pooler port 6543 but the project ref could not be parsed from the db.<project-ref>.supabase.co host.");
+    }
+
+    var projectRef = host.Substring(projectRefStart, projectRefLength);
+    host = poolerHost;
+
+    if (username.Equals("postgres", StringComparison.OrdinalIgnoreCase)) {
+        username = $"postgres.{projectRef}";
+    }
+
+    Console.WriteLine("[BlipSyncAgent] POSTGRES_CONNECTION_STRING detected Supabase pooler port with direct db host; normalized to pooler endpoint.");
 }
 
 static void ApplyUriQueryOptions(string query, NpgsqlConnectionStringBuilder builder) {
