@@ -1,0 +1,39 @@
+name: BLIP Sync (Windows Runner)
+
+on:
+  schedule:
+    - cron: "*/1 * * * *"  # 1-min target; GitHub schedules can drift to ~5 min under load
+  workflow_dispatch: {}
+
+concurrency:
+  group: blip-sync
+  cancel-in-progress: false
+
+jobs:
+  blip-sync:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      BLIP_USERNAME: ${{ secrets.BLIP_USERNAME }}
+      BLIP_PASSWORD: ${{ secrets.BLIP_PASSWORD }}
+      POSTGRES_CONNECTION_STRING: ${{ secrets.POSTGRES_CONNECTION_STRING }}
+      BLIP_BASE_URL: ${{ vars.BLIP_BASE_URL || 'https://app.blipbillboards.com' }}
+      BLIP_OPERATOR_SLUG: ${{ vars.BLIP_OPERATOR_SLUG || 'k7b6gz' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore outdoor_runner_repo2_dnd.sln
+
+      - name: Build
+        run: dotnet build outdoor_runner_repo2_dnd.sln --configuration Release --no-restore
+
+      - name: Run BLIP Sync Agent
+        run: dotnet run --project src/BlipSyncAgent/BlipSyncAgent.csproj --configuration Release --no-build

@@ -1,0 +1,10 @@
+{
+  "_comment": "Local dev only. In GitHub Actions, the agent reads from BLIP_USERNAME, BLIP_PASSWORD, POSTGRES_CONNECTION_STRING env vars (set as repo secrets).",
+  "Blip": {
+    "Username": "YOUR_BLIP_USERNAME",
+    "Password": "YOUR_BLIP_PASSWORD"
+  },
+  "Postgres": {
+    "ConnectionString": "User Id=postgres.ctmtpjdrsgtnwgwsxmsa;Password=YOUR-PASSWORD;Server=aws-0-us-east-1.pooler.supabase.com;Port=6543;Database=postgres;SSL Mode=Require;Trust Server Certificate=true"
+  }
+}
