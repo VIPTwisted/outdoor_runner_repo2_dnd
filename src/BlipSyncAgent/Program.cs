@@ -15,14 +15,12 @@ try {
 
     var visiblePrefixLength = Math.Min(10, rawPostgresConnectionString.Length);
     var maskedConnectionString = rawPostgresConnectionString.Substring(0, visiblePrefixLength) + "...***";
-    var postgresConnectionString = BuildNpgsqlConnectionString(rawPostgresConnectionString);
-    var postgresConnectionDiagnostics = GetSafeConnectionDiagnostics(postgresConnectionString);
+    var postgresConnectionStrings = BuildNpgsqlConnectionStrings(rawPostgresConnectionString);
     Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING loaded prefix={maskedConnectionString} length={rawPostgresConnectionString.Length}");
-    Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING normalized format={GetConnectionStringFormat(rawPostgresConnectionString)}");
-    Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING target host={postgresConnectionDiagnostics.Host} port={postgresConnectionDiagnostics.Port} database={postgresConnectionDiagnostics.Database} ssl={postgresConnectionDiagnostics.SslMode}");
+    Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING normalized format={GetConnectionStringFormat(rawPostgresConnectionString)} candidates={postgresConnectionStrings.Count}");
     Console.WriteLine($"[BlipSyncAgent] start  slug={cfg.BlipOperatorSlug}  runner={runnerKind}  wfRun={workflowRunId}");
 
-    using var repo = new SupabaseRepository(postgresConnectionString);
+    using var repo = OpenSupabaseRepository(postgresConnectionStrings);
 
     async Task RunOnePassAsync(string mode, Guid? requestId) {
         var runId = await repo.StartSyncRunAsync(mode, runnerKind, workflowRunId, requestId);
@@ -73,22 +71,49 @@ try {
     return 1;
 }
 
-static string BuildNpgsqlConnectionString(string rawConnectionString) {
+static SupabaseRepository OpenSupabaseRepository(IReadOnlyList<string> connectionStrings) {
+    Exception? lastException = null;
+
+    for (var index = 0; index < connectionStrings.Count; index++) {
+        var connectionString = connectionStrings[index];
+        var diagnostics = GetSafeConnectionDiagnostics(connectionString);
+        Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING target[{index + 1}/{connectionStrings.Count}] host={diagnostics.Host} port={diagnostics.Port} database={diagnostics.Database} ssl={diagnostics.SslMode}");
+
+        try {
+            var repo = new SupabaseRepository(connectionString);
+            Console.WriteLine($"[BlipSyncAgent] PostgreSQL connection opened using target[{index + 1}/{connectionStrings.Count}].");
+            return repo;
+        } catch (Exception ex) when (index + 1 < connectionStrings.Count && IsRetryableStartupConnectionFailure(ex)) {
+            lastException = ex;
+            Console.WriteLine($"[BlipSyncAgent] PostgreSQL target[{index + 1}/{connectionStrings.Count}] failed during startup: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    throw lastException ?? new InvalidOperationException("No PostgreSQL connection candidates were available.");
+}
+
+static bool IsRetryableStartupConnectionFailure(Exception ex) {
+    if (ex is NpgsqlException) return true;
+    if (ex.InnerException is NpgsqlException) return true;
+    return false;
+}
+
+static IReadOnlyList<string> BuildNpgsqlConnectionStrings(string rawConnectionString) {
     var trimmed = rawConnectionString.Trim();
     if (trimmed.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase) ||
         trimmed.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)) {
-        return ConvertPostgresUriToNpgsqlConnectionString(trimmed);
+        return ConvertPostgresUriToNpgsqlConnectionStrings(trimmed);
     }
 
     try {
         _ = new NpgsqlConnectionStringBuilder(trimmed);
-        return trimmed;
+        return new[] { trimmed };
     } catch (Exception ex) {
         throw new InvalidOperationException("POSTGRES_CONNECTION_STRING was loaded, but it is not a valid Npgsql key/value connection string or postgresql:// URI.", ex);
     }
 }
 
-static string ConvertPostgresUriToNpgsqlConnectionString(string postgresUri) {
+static IReadOnlyList<string> ConvertPostgresUriToNpgsqlConnectionStrings(string postgresUri) {
     if (!Uri.TryCreate(postgresUri, UriKind.Absolute, out var uri)) {
         throw new InvalidOperationException("POSTGRES_CONNECTION_STRING starts with postgres/postgresql but is not a valid absolute URI.");
     }
@@ -106,31 +131,35 @@ static string ConvertPostgresUriToNpgsqlConnectionString(string postgresUri) {
 
     var host = uri.Host;
     var port = uri.IsDefaultPort ? 5432 : uri.Port;
-    NormalizeSupabasePoolerEndpoint(uri, ref host, ref port, ref username);
-
     var database = Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/'));
-    var builder = new NpgsqlConnectionStringBuilder {
-        Host = host,
-        Port = port,
-        Database = string.IsNullOrWhiteSpace(database) ? "postgres" : database,
-        Username = username,
-        Password = password,
-        SslMode = SslMode.Require
-    };
+    var candidates = BuildSupabaseEndpointCandidates(host, port, username);
 
-    ApplyUriQueryOptions(uri.Query, builder);
-    return builder.ConnectionString;
+    var connectionStrings = new List<string>();
+    foreach (var candidate in candidates) {
+        var builder = new NpgsqlConnectionStringBuilder {
+            Host = candidate.Host,
+            Port = candidate.Port,
+            Database = string.IsNullOrWhiteSpace(database) ? "postgres" : database,
+            Username = candidate.Username,
+            Password = password,
+            SslMode = SslMode.Require
+        };
+
+        ApplyUriQueryOptions(uri.Query, builder);
+        connectionStrings.Add(builder.ConnectionString);
+    }
+
+    return connectionStrings;
 }
 
-static void NormalizeSupabasePoolerEndpoint(Uri uri, ref string host, ref int port, ref string username) {
+static IReadOnlyList<SupabaseEndpointCandidate> BuildSupabaseEndpointCandidates(string host, int port, string username) {
     const string directHostPrefix = "db.";
     const string directHostSuffix = ".supabase.co";
-    const string poolerHost = "aws-0-us-east-1.pooler.supabase.com";
 
     if (port != 6543 ||
         !host.StartsWith(directHostPrefix, StringComparison.OrdinalIgnoreCase) ||
         !host.EndsWith(directHostSuffix, StringComparison.OrdinalIgnoreCase)) {
-        return;
+        return new[] { new SupabaseEndpointCandidate(host, port, username) };
     }
 
     var projectRefStart = directHostPrefix.Length;
@@ -140,13 +169,15 @@ static void NormalizeSupabasePoolerEndpoint(Uri uri, ref string host, ref int po
     }
 
     var projectRef = host.Substring(projectRefStart, projectRefLength);
-    host = poolerHost;
+    var poolerUsername = username.Equals("postgres", StringComparison.OrdinalIgnoreCase)
+        ? $"postgres.{projectRef}"
+        : username;
 
-    if (username.Equals("postgres", StringComparison.OrdinalIgnoreCase)) {
-        username = $"postgres.{projectRef}";
-    }
-
-    Console.WriteLine("[BlipSyncAgent] POSTGRES_CONNECTION_STRING detected Supabase pooler port with direct db host; normalized to pooler endpoint.");
+    Console.WriteLine("[BlipSyncAgent] POSTGRES_CONNECTION_STRING detected Supabase pooler port with direct db host; normalized to pooler endpoint candidates.");
+    return new[] {
+        new SupabaseEndpointCandidate("aws-0-us-east-1.pooler.supabase.com", 6543, poolerUsername),
+        new SupabaseEndpointCandidate("aws-1-us-east-1.pooler.supabase.com", 6543, poolerUsername)
+    };
 }
 
 static void ApplyUriQueryOptions(string query, NpgsqlConnectionStringBuilder builder) {
@@ -192,4 +223,5 @@ static string GetConnectionStringFormat(string rawConnectionString) {
     return "npgsql-key-value";
 }
 
+readonly record struct SupabaseEndpointCandidate(string Host, int Port, string Username);
 readonly record struct SafeConnectionDiagnostics(string Host, int Port, string Database, string SslMode);
