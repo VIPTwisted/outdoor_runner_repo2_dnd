@@ -6,9 +6,18 @@ try {
     var cfg = new Config();
     var workflowRunId = Environment.GetEnvironmentVariable("GITHUB_RUN_ID");
     var runnerKind    = string.IsNullOrEmpty(workflowRunId) ? "local" : "github-actions";
+
+    var postgresConnectionString = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING");
+    if (string.IsNullOrWhiteSpace(postgresConnectionString)) {
+        throw new InvalidOperationException("POSTGRES_CONNECTION_STRING environment variable is required for BlipSyncAgent startup but was not set or was empty.");
+    }
+
+    var visiblePrefixLength = Math.Min(10, postgresConnectionString.Length);
+    var maskedConnectionString = postgresConnectionString.Substring(0, visiblePrefixLength) + "...***";
+    Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING loaded prefix={maskedConnectionString} length={postgresConnectionString.Length}");
     Console.WriteLine($"[BlipSyncAgent] start  slug={cfg.BlipOperatorSlug}  runner={runnerKind}  wfRun={workflowRunId}");
 
-    using var repo = new SupabaseRepository(cfg.PostgresConnectionString);
+    using var repo = new SupabaseRepository(postgresConnectionString);
 
     async Task RunOnePassAsync(string mode, Guid? requestId) {
         var runId = await repo.StartSyncRunAsync(mode, runnerKind, workflowRunId, requestId);
