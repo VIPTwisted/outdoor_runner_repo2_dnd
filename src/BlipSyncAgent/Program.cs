@@ -77,7 +77,7 @@ static SupabaseRepository OpenSupabaseRepository(IReadOnlyList<string> connectio
     for (var index = 0; index < connectionStrings.Count; index++) {
         var connectionString = connectionStrings[index];
         var diagnostics = GetSafeConnectionDiagnostics(connectionString);
-        Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING target[{index + 1}/{connectionStrings.Count}] host={diagnostics.Host} port={diagnostics.Port} database={diagnostics.Database} ssl={diagnostics.SslMode}");
+        Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING target[{index + 1}/{connectionStrings.Count}] host={diagnostics.Host} port={diagnostics.Port} database={diagnostics.Database} username={diagnostics.Username} ssl={diagnostics.SslMode}");
 
         try {
             var repo = new SupabaseRepository(connectionString);
@@ -209,6 +209,7 @@ static SafeConnectionDiagnostics GetSafeConnectionDiagnostics(string connectionS
         string.IsNullOrWhiteSpace(builder.Host) ? "<missing>" : builder.Host,
         builder.Port,
         string.IsNullOrWhiteSpace(builder.Database) ? "<missing>" : builder.Database,
+        string.IsNullOrWhiteSpace(builder.Username) ? "<missing>" : builder.Username,
         builder.SslMode.ToString()
     );
 }
@@ -224,4 +225,4 @@ static string GetConnectionStringFormat(string rawConnectionString) {
 }
 
 readonly record struct SupabaseEndpointCandidate(string Host, int Port, string Username);
-readonly record struct SafeConnectionDiagnostics(string Host, int Port, string Database, string SslMode);
+readonly record struct SafeConnectionDiagnostics(string Host, int Port, string Database, string Username, string SslMode);
