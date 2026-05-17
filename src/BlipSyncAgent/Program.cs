@@ -16,8 +16,10 @@ try {
     var visiblePrefixLength = Math.Min(10, rawPostgresConnectionString.Length);
     var maskedConnectionString = rawPostgresConnectionString.Substring(0, visiblePrefixLength) + "...***";
     var postgresConnectionString = BuildNpgsqlConnectionString(rawPostgresConnectionString);
+    var postgresConnectionDiagnostics = GetSafeConnectionDiagnostics(postgresConnectionString);
     Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING loaded prefix={maskedConnectionString} length={rawPostgresConnectionString.Length}");
     Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING normalized format={GetConnectionStringFormat(rawPostgresConnectionString)}");
+    Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING target host={postgresConnectionDiagnostics.Host} port={postgresConnectionDiagnostics.Port} database={postgresConnectionDiagnostics.Database} ssl={postgresConnectionDiagnostics.SslMode}");
     Console.WriteLine($"[BlipSyncAgent] start  slug={cfg.BlipOperatorSlug}  runner={runnerKind}  wfRun={workflowRunId}");
 
     using var repo = new SupabaseRepository(postgresConnectionString);
@@ -140,6 +142,16 @@ static void ApplyUriQueryOptions(string query, NpgsqlConnectionStringBuilder bui
     }
 }
 
+static SafeConnectionDiagnostics GetSafeConnectionDiagnostics(string connectionString) {
+    var builder = new NpgsqlConnectionStringBuilder(connectionString);
+    return new SafeConnectionDiagnostics(
+        string.IsNullOrWhiteSpace(builder.Host) ? "<missing>" : builder.Host,
+        builder.Port,
+        string.IsNullOrWhiteSpace(builder.Database) ? "<missing>" : builder.Database,
+        builder.SslMode.ToString()
+    );
+}
+
 static string GetConnectionStringFormat(string rawConnectionString) {
     var trimmed = rawConnectionString.Trim();
     if (trimmed.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase) ||
@@ -149,3 +161,5 @@ static string GetConnectionStringFormat(string rawConnectionString) {
 
     return "npgsql-key-value";
 }
+
+readonly record struct SafeConnectionDiagnostics(string Host, int Port, string Database, string SslMode);
