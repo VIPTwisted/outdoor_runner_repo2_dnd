@@ -1,103 +1,95 @@
 # outdoor_runner_repo2_dnd
 
-Free, cloud-only, 1-minute BLIP → Supabase sync runner.
+Free, cloud-only BLIP to Supabase sync runner for the DeMartino Outdoor Media platform.
 
-- Runs on **GitHub Actions Windows** every minute (free, unlimited on public repos)
-- Logs into BLIP via **Selenium Edge** with username/password
-- Reads pending sync requests from `dooh.sync_requests` (Supabase)
-- Scrapes boards, campaigns, ads, statuses, KPIs, messages, approvals, settings
-- Upserts into `dooh.blip_*` (Supabase Postgres)
-- Triggered from the Netlify site via Sync Now / Full Resync buttons
-- **No desktop daemon. No servers. No paid cloud.**
-
----
+- Runs from GitHub Actions on Windows.
+- Logs into BLIP through Selenium Edge using encrypted GitHub Actions secrets.
+- Reads pending sync requests from `dooh.sync_requests`.
+- Scrapes the authenticated BLIP operator UI only.
+- Writes raw captures into the existing `dooh.scraped_*` tables.
+- Upserts normalized rows into the existing `dooh.blip_*` / canonical DOOH tables where the schema has a stable key.
+- Is triggered by the Netlify platform inserting `dooh.sync_requests` rows.
+- Uses no BLIP API keys, no bearer tokens, no BLIP webhooks, no desktop daemon, and no paid runner.
 
 ## Architecture
 
-```
-Team → Netlify site → POST /api/sync-* → dooh.sync_requests row
-                                                  │
-                                                  │ polled every minute
-                                                  ▼
-                       GitHub Actions Windows runner (this repo)
-                            │
-                            ├── Selenium Edge → BLIP UI
-                            └── Npgsql       → Supabase dooh.*
-                                                  │
-                                                  ▼
-                            Netlify reads Supabase, team sees fresh data
+```text
+Platform button/API -> dooh.sync_requests row
+                    -> GitHub Actions Windows runner
+                    -> Selenium Edge authenticated BLIP UI session
+                    -> Supabase dooh.* mirror tables
+                    -> Netlify platform reads Supabase
 ```
 
-Your laptop, dedicated hardware, and BLIP API are NOT involved.
+The platform never calls BLIP from the browser. BLIP credentials only exist as encrypted GitHub Actions secrets and are only used inside the runner VM.
 
----
+## Required GitHub Actions configuration
 
-## Setup
+Repository: `VIPTwisted/outdoor_runner_repo2_dnd`
 
-### 1. Apply Supabase schema (once)
+Required repository secrets:
 
-Open `migrations/sync_schema.sql`, paste into Supabase SQL Editor, Run.
+| Name | Purpose |
+| --- | --- |
+| `BLIP_USERNAME` | BLIP login email for the sync account |
+| `BLIP_PASSWORD` | BLIP login password for the sync account |
+| `POSTGRES_CONNECTION_STRING` | Supabase transaction-pooler connection string in Npgsql key/value format |
 
-### 2. Add GitHub Actions secrets (once)
+Required repository variables:
 
-Go to: https://github.com/VIPTwisted/outdoor_runner_repo2_dnd/settings/secrets/actions
+| Name | Default |
+| --- | --- |
+| `BLIP_BASE_URL` | `https://app.blipbillboards.com` |
+| `BLIP_OPERATOR_SLUG` | `k7b6gz` |
 
-Add three **Repository secrets**:
+The confirmed Supabase connection target is:
 
-| Name | Value |
-|---|---|
-| `BLIP_USERNAME` | your BLIP login email |
-| `BLIP_PASSWORD` | your BLIP password (use a dedicated service account if possible) |
-| `POSTGRES_CONNECTION_STRING` | `User Id=postgres.ctmtpjdrsgtnwgwsxmsa;Password=YOUR-PASSWORD;Server=aws-0-us-east-1.pooler.supabase.com;Port=6543;Database=postgres;SSL Mode=Require;Trust Server Certificate=true` |
+```text
+Host=aws-1-us-east-1.pooler.supabase.com;Port=6543;Database=postgres;Username=postgres.ctmtpjdrsgtnwgwsxmsa;SSL Mode=Require;Trust Server Certificate=true
+```
 
-### 3. Workflow auto-enables
+Do not place the database password in this file.
 
-Once `.github/workflows/blip-sync.yml` is in `main`, GitHub starts running it every minute automatically. First run typically appears within 5 minutes.
+## Captured BLIP sections
 
-### 4. Trigger manually for first test
+The runner follows the documented BLIP/Adkom mirror surface and writes to the live schema already present in Supabase.
 
-Go to: https://github.com/VIPTwisted/outdoor_runner_repo2_dnd/actions
+| BLIP section | Route | Raw table | Normalized table |
+| --- | --- | --- | --- |
+| Dashboard widgets | `/{slug}/dashboard` | `dooh.scraped_dashboard_widgets` | run manifest only |
+| Plant signs | `/{slug}/signs/signs` | `dooh.scraped_plant_signs` | `dooh.blip_plant_signs` |
+| Adkom availability | `/{slug}/adkom/availability` | `dooh.scraped_adkom_avails` | `dooh.blip_avails` |
+| Adkom holds | `/{slug}/adkom/hold` | `dooh.scraped_adkom_holds` | `dooh.blip_holds` |
+| Adkom contracts | `/{slug}/adkom/contract` | `dooh.scraped_adkom_contracts` | `dooh.blip_contracts` |
+| Adkom creatives | `/{slug}/adkom/creative` | `dooh.scraped_adkom_creatives` | raw queue only |
+| Adkom POP | `/{slug}/adkom/pop` | `dooh.scraped_adkom_pop` | `dooh.blip_pop_reports` |
+| Marketplace | `/{slug}/marketplace` | `dooh.scraped_marketplace_groups` | raw queue only |
+| Programmatic reports | `/{slug}/programmatic/report` | `dooh.scraped_programmatic_reports` | raw queue only |
 
-Pick **BLIP Sync (Windows Runner)** → **Run workflow** → main → Run.
+## False-success guard
 
----
+If login completes but every documented scrape target returns zero rows, the runner fails the sync run and opens a platform incident. This prevents a GitHub Actions "green" run from being treated as a working BLIP mirror when selectors or BLIP routes have drifted.
 
-## What gets captured
+## Validation
 
-`BlipSyncAgent` scrapes the BLIP web UI and writes into:
+Build locally:
 
-| Supabase table | What it holds |
-|---|---|
-| `dooh.blip_boards` | board id, name, location, status, raw outerHTML |
-| `dooh.blip_campaigns` | campaign id, name, advertiser, dates, status, budget |
-| `dooh.blip_ads` | ad id, campaign_id, board_id, status |
-| `dooh.sync_requests` | queue of incremental/full sync triggers, status pending → processing → completed |
+```powershell
+dotnet build outdoor_runner_repo2_dnd.sln --configuration Release --no-restore
+```
 
-Extend `BlipScraper.cs` to add more sections (faces, reports, messages, approvals, settings) — same scrape-then-upsert pattern.
+Check the latest run in Supabase:
 
----
+```sql
+select id, status, started_at, finished_at, source_payload
+from dooh.sync_runs
+order by started_at desc
+limit 5;
 
-## Timing
+select ts, level, component, message, context
+from dooh.sync_events
+where sync_run_id = '<latest-run-id>'
+order by ts;
+```
 
-- Typical: 60–75 seconds from BLIP change → Supabase row updated
-- Occasional: 90–120 seconds (GitHub Actions queue depth)
-- Never: real-time / sub-30-second (architecture limit)
-
----
-
-## Cost
-
-**$0/month.** Public repo → unlimited free Windows minutes on GitHub Actions.
-
----
-
-## Hard rules honored
-
-- No backend server we run
-- No webhooks
-- No Render / no paid cloud cron
-- No browser-side BLIP calls
-- BLIP credentials only in GitHub encrypted secrets, only used inside the runner VM
-- No desktop daemon, no local server
-
-Rule 4 of the locked architecture is hereby revised to permit **free GitHub Actions on a public repo**. All other rules remain.
+Expected proof of a real sync is non-zero row counts in `source_payload.manifest` and `persist` events for the captured sections.
