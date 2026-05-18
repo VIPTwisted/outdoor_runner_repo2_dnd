@@ -7,6 +7,7 @@ namespace BlipSyncAgent.BlipClient;
 public class BlipSession : IDisposable {
     private readonly Config _cfg;
     private readonly IWebDriver _driver;
+    private string? _authenticatedBaseUrl;
     public IWebDriver Driver => _driver;
     public string BaseUrl => _cfg.BlipBaseUrl.TrimEnd('/');
     public string OperatorSlug => _cfg.BlipOperatorSlug;
@@ -54,13 +55,24 @@ public class BlipSession : IDisposable {
             Console.Error.WriteLine("[BlipSession] login wait timed out — likely 2FA or wrong creds. Title=" + _driver.Title);
             throw;
         }
+
+        _authenticatedBaseUrl = ResolveAuthenticatedBaseUrl(_driver.Url);
         Console.WriteLine("[BlipSession] login OK url=" + _driver.Url);
+        Console.WriteLine("[BlipSession] authenticated base=" + _authenticatedBaseUrl);
     }
 
     public void GoTo(string path) {
-        var url = path.StartsWith("http") ? path : BaseUrl + path;
+        var url = path.StartsWith("http") ? path : (_authenticatedBaseUrl ?? BaseUrl) + path;
         Console.WriteLine("[BlipSession] GET " + url);
         _driver.Navigate().GoToUrl(url);
+    }
+
+    private string ResolveAuthenticatedBaseUrl(string currentUrl) {
+        if (Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri)) {
+            return $"{uri.Scheme}://{uri.Host}";
+        }
+
+        return BaseUrl;
     }
 
     public void Dispose() {

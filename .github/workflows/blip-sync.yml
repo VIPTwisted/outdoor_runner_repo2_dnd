@@ -17,7 +17,7 @@ jobs:
       BLIP_USERNAME: ${{ secrets.BLIP_USERNAME }}
       BLIP_PASSWORD: ${{ secrets.BLIP_PASSWORD }}
       POSTGRES_CONNECTION_STRING: ${{ secrets.POSTGRES_CONNECTION_STRING }}
-      BLIP_BASE_URL: ${{ vars.BLIP_BASE_URL || 'https://app.blipbillboards.com' }}
+      BLIP_BASE_URL: ${{ vars.BLIP_BASE_URL || 'https://operator.blipbillboards.com' }}
       BLIP_OPERATOR_SLUG: ${{ vars.BLIP_OPERATOR_SLUG || 'k7b6gz' }}
 
     steps:

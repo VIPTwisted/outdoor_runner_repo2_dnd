@@ -11,7 +11,7 @@ public class Config {
         BlipUsername              = Require("BLIP_USERNAME");
         BlipPassword              = Require("BLIP_PASSWORD");
         PostgresConnectionString  = Require("POSTGRES_CONNECTION_STRING");
-        BlipBaseUrl               = Environment.GetEnvironmentVariable("BLIP_BASE_URL")       ?? "https://app.blipbillboards.com";
+        BlipBaseUrl               = Environment.GetEnvironmentVariable("BLIP_BASE_URL")       ?? "https://operator.blipbillboards.com";
         BlipOperatorSlug          = Environment.GetEnvironmentVariable("BLIP_OPERATOR_SLUG")  ?? "k7b6gz";
     }
 

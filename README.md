@@ -39,7 +39,7 @@ Required repository variables:
 
 | Name | Default |
 | --- | --- |
-| `BLIP_BASE_URL` | `https://app.blipbillboards.com` |
+| `BLIP_BASE_URL` | `https://operator.blipbillboards.com` |
 | `BLIP_OPERATOR_SLUG` | `k7b6gz` |
 
 The confirmed Supabase connection target is:
