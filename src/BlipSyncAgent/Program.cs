@@ -2,6 +2,8 @@ using BlipSyncAgent;
 using BlipSyncAgent.BlipClient;
 using BlipSyncAgent.Data;
 using Npgsql;
+using System.Security.Cryptography;
+using System.Text;
 
 try {
     var cfg = new Config();
@@ -17,6 +19,7 @@ try {
     var maskedConnectionString = rawPostgresConnectionString.Substring(0, visiblePrefixLength) + "...***";
     var postgresConnectionStrings = BuildNpgsqlConnectionStrings(rawPostgresConnectionString);
     Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING loaded prefix={maskedConnectionString} length={rawPostgresConnectionString.Length}");
+    Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING fingerprint={GetSecretFingerprint(rawPostgresConnectionString)}");
     Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING normalized format={GetConnectionStringFormat(rawPostgresConnectionString)} candidates={postgresConnectionStrings.Count}");
     Console.WriteLine($"[BlipSyncAgent] start  slug={cfg.BlipOperatorSlug}  runner={runnerKind}  wfRun={workflowRunId}");
 
@@ -222,6 +225,11 @@ static string GetConnectionStringFormat(string rawConnectionString) {
     }
 
     return "npgsql-key-value";
+}
+
+static string GetSecretFingerprint(string value) {
+    var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+    return Convert.ToHexString(hash).Substring(0, 16).ToLowerInvariant();
 }
 
 readonly record struct SupabaseEndpointCandidate(string Host, int Port, string Username);
