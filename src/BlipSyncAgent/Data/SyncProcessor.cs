@@ -71,6 +71,8 @@ public sealed class SyncProcessor {
         if (rows.Count > 0) {
             await persist(rows);
             await _repo.LogEventAsync(runId, "info", "persist", component, $"upserted {rows.Count} rows");
+        } else if (scrape.Target is BlipScraper scraper) {
+            scraper.WriteDiagnostics(component);
         }
     }
 }

@@ -37,3 +37,11 @@ jobs:
 
       - name: Run BLIP Sync Agent
         run: dotnet run --project src/BlipSyncAgent/BlipSyncAgent.csproj --configuration Release --no-build
+
+      - name: Upload BLIP diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blip-diagnostics-${{ github.run_id }}
+          path: blip-diagnostics/
+          if-no-files-found: ignore

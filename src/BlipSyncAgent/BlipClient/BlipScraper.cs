@@ -167,6 +167,46 @@ public sealed class BlipScraper {
             .ToList();
     }
 
+    public void WriteDiagnostics(string sectionId) {
+        try {
+            Directory.CreateDirectory("blip-diagnostics");
+            var safeSection = Regex.Replace(sectionId, @"[^a-zA-Z0-9_.-]+", "-").Trim('-');
+            var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
+            var prefix = Path.Combine("blip-diagnostics", $"{stamp}-{safeSection}");
+            var title = _s.Driver.Title ?? "";
+            var url = _s.Driver.Url ?? "";
+            var text = Clean(_s.Driver.FindElement(By.TagName("body")).Text);
+            var html = _s.Driver.PageSource ?? "";
+            var tableCount = _s.Driver.FindElements(By.CssSelector("table")).Count;
+            var trCount = _s.Driver.FindElements(By.CssSelector("tr")).Count;
+            var roleRowCount = _s.Driver.FindElements(By.CssSelector("[role='row']")).Count;
+            var matRowCount = _s.Driver.FindElements(By.CssSelector(".mat-row, .mat-mdc-row")).Count;
+
+            File.WriteAllText(prefix + ".txt", string.Join(Environment.NewLine, new[] {
+                $"section={sectionId}",
+                $"url={url}",
+                $"title={title}",
+                $"body_text_length={text.Length}",
+                $"html_length={html.Length}",
+                $"table_count={tableCount}",
+                $"tr_count={trCount}",
+                $"role_row_count={roleRowCount}",
+                $"mat_row_count={matRowCount}",
+                "",
+                text
+            }));
+            File.WriteAllText(prefix + ".html", html);
+
+            if (_s.Driver is ITakesScreenshot shooter) {
+                shooter.GetScreenshot().SaveAsFile(prefix + ".png");
+            }
+
+            Console.WriteLine($"[scraper] diagnostics written for {sectionId}: url={url} title={title} textLength={text.Length} htmlLength={html.Length} tables={tableCount} trs={trCount} roleRows={roleRowCount} matRows={matRowCount}");
+        } catch (Exception ex) {
+            Console.WriteLine($"[scraper] diagnostics failed for {sectionId}: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     private List<ScrapedTableRow> ExtractTableRows(string sectionId) {
         WaitForPageToSettle();
         ScrollPage();
