@@ -130,6 +130,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string sql = @"
             insert into dooh.scraped_dashboard_widgets
                 (id, section_id, source_url, org, sign, slot_number, ad_group, days_left, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Org, @Sign, @SlotNumber, @AdGroup, @DaysLeft, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -150,6 +151,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string scrapedSql = @"
             insert into dooh.scraped_plant_signs
                 (id, section_id, source_url, title, subtitle, raw_text, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Title, @Subtitle, @RawText, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -195,6 +197,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string scrapedSql = @"
             insert into dooh.scraped_adkom_avails
                 (id, section_id, source_url, proposal, requested, start_date, end_date, due_date, units, status, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Proposal, @Requested, @StartDate, @EndDate, @DueDate, @Units, @Status, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -251,6 +254,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string scrapedSql = @"
             insert into dooh.scraped_adkom_holds
                 (id, section_id, source_url, proposal, requested, start_date, end_date, units, proposed_rate, status, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Proposal, @Requested, @StartDate, @EndDate, @Units, @ProposedRate, @Status, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -307,6 +311,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string scrapedSql = @"
             insert into dooh.scraped_adkom_contracts
                 (id, section_id, source_url, contract_no, proposal, start_date, end_date, amount, status, units, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @ContractNo, @Proposal, @StartDate, @EndDate, @Amount, @Status, @Units, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -364,6 +369,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string sql = @"
             insert into dooh.scraped_adkom_creatives
                 (id, section_id, source_url, proposal, review_date, creatives, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Proposal, @ReviewDate, @Creatives, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -382,6 +388,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string scrapedSql = @"
             insert into dooh.scraped_adkom_pop
                 (id, section_id, source_url, proposal, pop_date, creatives, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Proposal, @PopDate, @Creatives, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -426,6 +433,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string sql = @"
             insert into dooh.scraped_marketplace_groups
                 (id, section_id, source_url, group_name, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Name, @RawJson::jsonb, now())
             on conflict (id) do update set
@@ -442,6 +450,7 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
         const string sql = @"
             insert into dooh.scraped_programmatic_reports
                 (id, section_id, source_url, report_name, description, created, status, format, raw, processed_at)
+            overriding system value
             values
                 (@Id, @SectionId, @SourceUrl, @Name, @Description, @Created, @Status, @Format, @RawJson::jsonb, now())
             on conflict (id) do update set
