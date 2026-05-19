@@ -49,7 +49,7 @@ try {
 
     using (repo) {
 
-    async Task RunOnePassAsync(string mode, Guid? requestId) {
+    async Task<int> RunOnePassAsync(string mode, Guid? requestId) {
         var runId = await repo.StartSyncRunAsync(mode, runnerKind, workflowRunId, requestId);
         await repo.LogEventAsync(runId, "info", "init", "agent", $"pass started mode={mode}");
         int rows = 0;
@@ -61,8 +61,10 @@ try {
             var proc = new SyncProcessor(repo);
             var manifest = await proc.RunWithForensicsAsync(blip, mode, runId);
             rows = manifest.RowsUpserted;
+            Console.WriteLine($"[BlipSyncAgent] pass completed mode={mode} rows={rows} dashboard={manifest.DashboardWidgets} plant_signs={manifest.PlantSigns} adkom_availability={manifest.AdkomAvailability} adkom_holds={manifest.AdkomHolds} adkom_contracts={manifest.AdkomContracts} adkom_creatives={manifest.AdkomCreatives} adkom_pop={manifest.AdkomPop} marketplace={manifest.MarketplaceGroups} programmatic_reports={manifest.ProgrammaticReports}");
             await repo.LogEventAsync(runId, "info", "finalize", "agent", "pass completed", manifest);
             await repo.FinishSyncRunAsync(runId, "succeeded", null, rows, manifest);
+            return rows;
         } catch (Exception ex) {
             await repo.LogEventAsync(runId, "error", "fatal", "agent", ex.Message, new { stack = ex.ToString() });
             await repo.FinishSyncRunAsync(runId, "failed", ex.Message, rows, null);
@@ -71,27 +73,31 @@ try {
         }
     }
 
-    int processed = 0;
+    int processedRequests = 0;
+    int completedPasses = 0;
+    int rowsUpserted = 0;
     while (true) {
         var claimed = await repo.ClaimNextPendingAsync();
         if (claimed == null) break;
         var (reqId, mode) = claimed.Value;
         Console.WriteLine($"[BlipSyncAgent] claimed sync_request id={reqId} mode={mode}");
         try {
-            await RunOnePassAsync(mode, reqId);
+            rowsUpserted += await RunOnePassAsync(mode, reqId);
             await repo.MarkCompletedAsync(reqId);
-            processed++;
+            processedRequests++;
+            completedPasses++;
         } catch (Exception ex) {
             await repo.MarkCompletedAsync(reqId, error: ex.ToString());
         }
     }
 
-    if (processed == 0) {
+    if (completedPasses == 0) {
         // Heartbeat: every Actions invocation still does an incremental sync so cadence holds.
-        await RunOnePassAsync("heartbeat", null);
+        rowsUpserted += await RunOnePassAsync("heartbeat", null);
+        completedPasses++;
     }
 
-        Console.WriteLine($"[BlipSyncAgent] done. processed={processed}");
+        Console.WriteLine($"[BlipSyncAgent] done. passes={completedPasses} processed_requests={processedRequests} rows_upserted={rowsUpserted}");
         return 0;
     }
 } catch (Exception ex) {
