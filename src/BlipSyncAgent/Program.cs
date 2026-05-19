@@ -23,7 +23,31 @@ try {
     Console.WriteLine($"[BlipSyncAgent] POSTGRES_CONNECTION_STRING normalized format={GetConnectionStringFormat(rawPostgresConnectionString)} candidates={postgresConnectionStrings.Count}");
     Console.WriteLine($"[BlipSyncAgent] start  slug={cfg.BlipOperatorSlug}  runner={runnerKind}  wfRun={workflowRunId}");
 
-    using var repo = OpenSupabaseRepository(postgresConnectionStrings);
+    SupabaseRepository repo;
+    try {
+        repo = OpenSupabaseRepository(postgresConnectionStrings);
+    } catch (Exception dbEx) {
+        Console.Error.WriteLine("[BlipSyncAgent] PostgreSQL persistence unavailable before scrape: " + dbEx.GetType().Name + ": " + dbEx.Message);
+        Console.Error.WriteLine("[BlipSyncAgent] continuing in artifact-only forensic scrape mode; no database writes will be attempted.");
+
+        var artifactRunId = Guid.NewGuid();
+        var artifactSink = new ArtifactSyncSink();
+        await artifactSink.LogEventAsync(artifactRunId, "error", "startup", "database", "PostgreSQL persistence unavailable before scrape", new {
+            error_type = dbEx.GetType().FullName,
+            message = dbEx.Message
+        });
+
+        using var blip = new BlipSession(cfg);
+        await artifactSink.LogEventAsync(artifactRunId, "info", "login", "agent", "browser launched");
+        await blip.LoginAsync();
+        await artifactSink.LogEventAsync(artifactRunId, "info", "login", "agent", "login complete");
+        var artifactManifest = await new SyncProcessor(artifactSink).RunWithForensicsAsync(blip, "artifact-only-db-unavailable", artifactRunId);
+        await artifactSink.LogEventAsync(artifactRunId, "error", "finalize", "agent", "artifact-only scrape completed but database persistence is unavailable", artifactManifest);
+        Console.Error.WriteLine($"[BlipSyncAgent] artifact-only scrape completed rows={artifactManifest.RowsUpserted}; failing workflow because database persistence is still unavailable.");
+        return 2;
+    }
+
+    using (repo) {
 
     async Task RunOnePassAsync(string mode, Guid? requestId) {
         var runId = await repo.StartSyncRunAsync(mode, runnerKind, workflowRunId, requestId);
@@ -67,8 +91,9 @@ try {
         await RunOnePassAsync("heartbeat", null);
     }
 
-    Console.WriteLine($"[BlipSyncAgent] done. processed={processed}");
-    return 0;
+        Console.WriteLine($"[BlipSyncAgent] done. processed={processed}");
+        return 0;
+    }
 } catch (Exception ex) {
     Console.Error.WriteLine("[BlipSyncAgent] FATAL: " + ex);
     return 1;

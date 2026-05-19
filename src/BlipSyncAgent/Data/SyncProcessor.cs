@@ -26,8 +26,8 @@ public sealed class SyncManifestSummary {
 }
 
 public sealed class SyncProcessor {
-    private readonly SupabaseRepository _repo;
-    public SyncProcessor(SupabaseRepository repo) { _repo = repo; }
+    private readonly IBlipSyncSink _sink;
+    public SyncProcessor(IBlipSyncSink sink) { _sink = sink; }
 
     public async Task<SyncManifestSummary> RunWithForensicsAsync(BlipSession blip, string mode, Guid runId) {
         var manifest = new SyncManifestSummary();
@@ -36,15 +36,15 @@ public sealed class SyncProcessor {
         var network = new BlipNetworkRecorder(blip);
         network.Install();
 
-        await CaptureAsync("dashboard", "GET /dashboard", nav.GotoDashboard, scraper.ScrapeDashboardWidgets, _repo.UpsertDashboardWidgetsAsync, count => manifest.DashboardWidgets = count, runId, network);
-        await CaptureAsync("plant-signs", "GET /signs/signs", nav.GotoPlantSigns, scraper.ScrapePlantSigns, _repo.UpsertPlantSignsAsync, count => manifest.PlantSigns = count, runId, network);
-        await CaptureAsync("adkom-availability", "GET /adkom/available", nav.GotoAdkomAvailability, scraper.ScrapeAdkomAvailability, _repo.UpsertAdkomAvailabilityAsync, count => manifest.AdkomAvailability = count, runId, network);
-        await CaptureAsync("adkom-holds", "GET /adkom/holds", nav.GotoAdkomHolds, scraper.ScrapeAdkomHolds, _repo.UpsertAdkomHoldsAsync, count => manifest.AdkomHolds = count, runId, network);
-        await CaptureAsync("adkom-contracts", "GET /adkom/contracts", nav.GotoAdkomContracts, scraper.ScrapeAdkomContracts, _repo.UpsertAdkomContractsAsync, count => manifest.AdkomContracts = count, runId, network);
-        await CaptureAsync("adkom-creatives", "GET /adkom/creatives", nav.GotoAdkomCreatives, scraper.ScrapeAdkomCreatives, _repo.UpsertAdkomCreativesAsync, count => manifest.AdkomCreatives = count, runId, network);
-        await CaptureAsync("adkom-pop", "GET /adkom/pops", nav.GotoAdkomPop, scraper.ScrapeAdkomPop, _repo.UpsertAdkomPopAsync, count => manifest.AdkomPop = count, runId, network);
-        await CaptureAsync("marketplace", "GET /organizations/marketplace-analytics", nav.GotoMarketplace, scraper.ScrapeMarketplaceGroups, _repo.UpsertMarketplaceGroupsAsync, count => manifest.MarketplaceGroups = count, runId, network);
-        await CaptureAsync("programmatic-reports", "GET /organizations/programmatic/reports", nav.GotoProgrammaticReports, scraper.ScrapeProgrammaticReports, _repo.UpsertProgrammaticReportsAsync, count => manifest.ProgrammaticReports = count, runId, network);
+        await CaptureAsync("dashboard", "GET /dashboard", nav.GotoDashboard, scraper.ScrapeDashboardWidgets, _sink.UpsertDashboardWidgetsAsync, count => manifest.DashboardWidgets = count, runId, network);
+        await CaptureAsync("plant-signs", "GET /signs/signs", nav.GotoPlantSigns, scraper.ScrapePlantSigns, _sink.UpsertPlantSignsAsync, count => manifest.PlantSigns = count, runId, network);
+        await CaptureAsync("adkom-availability", "GET /adkom/available", nav.GotoAdkomAvailability, scraper.ScrapeAdkomAvailability, _sink.UpsertAdkomAvailabilityAsync, count => manifest.AdkomAvailability = count, runId, network);
+        await CaptureAsync("adkom-holds", "GET /adkom/holds", nav.GotoAdkomHolds, scraper.ScrapeAdkomHolds, _sink.UpsertAdkomHoldsAsync, count => manifest.AdkomHolds = count, runId, network);
+        await CaptureAsync("adkom-contracts", "GET /adkom/contracts", nav.GotoAdkomContracts, scraper.ScrapeAdkomContracts, _sink.UpsertAdkomContractsAsync, count => manifest.AdkomContracts = count, runId, network);
+        await CaptureAsync("adkom-creatives", "GET /adkom/creatives", nav.GotoAdkomCreatives, scraper.ScrapeAdkomCreatives, _sink.UpsertAdkomCreativesAsync, count => manifest.AdkomCreatives = count, runId, network);
+        await CaptureAsync("adkom-pop", "GET /adkom/pops", nav.GotoAdkomPop, scraper.ScrapeAdkomPop, _sink.UpsertAdkomPopAsync, count => manifest.AdkomPop = count, runId, network);
+        await CaptureAsync("marketplace", "GET /organizations/marketplace-analytics", nav.GotoMarketplace, scraper.ScrapeMarketplaceGroups, _sink.UpsertMarketplaceGroupsAsync, count => manifest.MarketplaceGroups = count, runId, network);
+        await CaptureAsync("programmatic-reports", "GET /organizations/programmatic/reports", nav.GotoProgrammaticReports, scraper.ScrapeProgrammaticReports, _sink.UpsertProgrammaticReportsAsync, count => manifest.ProgrammaticReports = count, runId, network);
 
         if (manifest.RowsUpserted == 0) {
             throw new InvalidOperationException("BLIP login completed, but every documented scrape target returned zero rows. Treating this as a failed sync to prevent false-success drift.");
@@ -63,7 +63,7 @@ public sealed class SyncProcessor {
         Guid runId,
         BlipNetworkRecorder network
     ) {
-        await _repo.LogEventAsync(runId, "info", "navigate", component, navigationMessage);
+        await _sink.LogEventAsync(runId, "info", "navigate", component, navigationMessage);
         network.Clear();
         navigate();
         await Task.Delay(2500);
@@ -75,10 +75,10 @@ public sealed class SyncProcessor {
 
         var restCount = networkEvents.Count(evt => evt.Url.Contains("/api/", StringComparison.OrdinalIgnoreCase));
         var graphCount = networkEvents.Count(evt => evt.Url.Contains("/gql", StringComparison.OrdinalIgnoreCase) || evt.Url.Contains("graphql", StringComparison.OrdinalIgnoreCase));
-        await _repo.LogEventAsync(runId, "info", "scrape", component, $"scraped {rows.Count} rows; network events={networkEvents.Count}; rest={restCount}; graphql={graphCount}");
+        await _sink.LogEventAsync(runId, "info", "scrape", component, $"scraped {rows.Count} rows; network events={networkEvents.Count}; rest={restCount}; graphql={graphCount}");
         if (rows.Count > 0) {
             await persist(rows);
-            await _repo.LogEventAsync(runId, "info", "persist", component, $"upserted {rows.Count} rows");
+            await _sink.LogEventAsync(runId, "info", "persist", component, $"upserted {rows.Count} rows");
         } else if (scrape.Target is BlipScraper scraper) {
             scraper.WriteDiagnostics(component);
         }

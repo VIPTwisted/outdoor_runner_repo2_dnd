@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace BlipSyncAgent.Data;
 
-public class SupabaseRepository : IDisposable {
+public class SupabaseRepository : IBlipSyncSink, IDisposable {
     private readonly NpgsqlConnection _conn;
     private Guid? _orgId;
 
