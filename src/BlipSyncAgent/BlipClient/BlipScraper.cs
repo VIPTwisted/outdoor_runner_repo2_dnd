@@ -210,11 +210,32 @@ public sealed class BlipScraper {
     private List<ScrapedTableRow> ExtractTableRows(string sectionId) {
         WaitForPageToSettle();
         ScrollPage();
+        ScrollScrollableContainers();
 
         var rows = _s.Driver
-            .FindElements(By.CssSelector("table tbody tr, tr.mat-row, tr.mat-mdc-row, tr[role='row'], .mat-row, .mat-mdc-row, .MuiTableRow-root"))
+            .FindElements(By.CssSelector(string.Join(", ", new[] {
+                "table tbody tr",
+                "tr.mat-row",
+                "tr.mat-mdc-row",
+                "tr[role='row']",
+                ".mat-row",
+                ".mat-mdc-row",
+                ".MuiTableRow-root",
+                ".MuiDataGrid-row",
+                "cdk-row",
+                "mat-row",
+                "[role='row']",
+                "[role='listitem']",
+                ".mat-list-item",
+                ".mat-mdc-list-item",
+                ".mat-card",
+                ".mat-mdc-card",
+                ".MuiCard-root",
+                ".card",
+                "li"
+            })))
             .Select(row => SnapshotRow(sectionId, row))
-            .Where(row => row.Cells.Count > 0 && !LooksLikeHeader(row.Cells))
+            .Where(row => row.Cells.Count > 0 && !LooksLikeHeader(row.Cells) && !LooksLikeChrome(row.RawText))
             .GroupBy(row => row.Id)
             .Select(group => group.First())
             .ToList();
@@ -246,7 +267,12 @@ public sealed class BlipScraper {
             source_url = sourceUrl,
             cells,
             raw_text = rawText,
-            html = rawHtml
+            html = rawHtml,
+            element_tag = SafeAttr(row, "tagName"),
+            class_name = SafeAttr(row, "class"),
+            role = SafeAttr(row, "role"),
+            data_testid = SafeAttr(row, "data-testid"),
+            aria_label = SafeAttr(row, "aria-label")
         });
 
         return new ScrapedTableRow {
@@ -290,10 +316,39 @@ public sealed class BlipScraper {
         }
     }
 
+    private void ScrollScrollableContainers() {
+        try {
+            var js = (IJavaScriptExecutor)_s.Driver;
+            js.ExecuteScript("""
+const nodes = Array.from(document.querySelectorAll('*'))
+  .filter(el => {
+    const style = window.getComputedStyle(el);
+    return el.scrollHeight > el.clientHeight + 40 && ['auto', 'scroll'].includes(style.overflowY);
+  })
+  .slice(0, 20);
+for (const node of nodes) {
+  node.scrollTop = 0;
+  for (let i = 0; i < 8; i++) node.scrollTop = node.scrollHeight;
+}
+""");
+            Thread.Sleep(750);
+        } catch {
+            Thread.Sleep(250);
+        }
+    }
+
     private static bool LooksLikeHeader(IReadOnlyList<string> cells) {
         if (cells.Count == 0) return true;
         var joined = string.Join("|", cells).ToLowerInvariant();
         return joined is "proposal|requested|start|end|due|# units" or "contract no|proposal|requested|start|end|# units|amount|status";
+    }
+
+    private static bool LooksLikeChrome(string rawText) {
+        if (string.IsNullOrWhiteSpace(rawText)) return true;
+        var normalized = Clean(rawText).ToLowerInvariant();
+        if (normalized.Length < 3) return true;
+        if (normalized.Length > 4000) return true;
+        return normalized is "dashboard" or "fold all" or "help" or "revenue sources" or "adkom" or "marketplace" or "programmatic" or "plant management" or "organization";
     }
 
     private static string? At(IReadOnlyList<string> cells, int index) {

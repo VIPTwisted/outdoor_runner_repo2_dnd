@@ -14,11 +14,11 @@ public class BlipNavigator {
     public void GotoPlantReports()        => _s.GoTo($"/{_s.OperatorSlug}/signs/reports");
     public void GotoCampaigns()           => _s.GoTo($"/{_s.OperatorSlug}/campaigns");
     public void GotoAds()                 => _s.GoTo($"/{_s.OperatorSlug}/ads");
-    public void GotoAdkomAvailability()   => _s.GoTo($"/{_s.OperatorSlug}/adkom/availability");
-    public void GotoAdkomHolds()          => _s.GoTo($"/{_s.OperatorSlug}/adkom/hold");
-    public void GotoAdkomContracts()      => _s.GoTo($"/{_s.OperatorSlug}/adkom/contract");
-    public void GotoAdkomCreatives()      => _s.GoTo($"/{_s.OperatorSlug}/adkom/creative");
-    public void GotoAdkomPop()            => _s.GoTo($"/{_s.OperatorSlug}/adkom/pop");
-    public void GotoMarketplace()         => _s.GoTo($"/{_s.OperatorSlug}/marketplace");
-    public void GotoProgrammaticReports() => _s.GoTo($"/{_s.OperatorSlug}/programmatic/report");
+    public void GotoAdkomAvailability()   => _s.GoTo($"/{_s.OperatorSlug}/adkom/available");
+    public void GotoAdkomHolds()          => _s.GoTo($"/{_s.OperatorSlug}/adkom/holds");
+    public void GotoAdkomContracts()      => _s.GoTo($"/{_s.OperatorSlug}/adkom/contracts");
+    public void GotoAdkomCreatives()      => _s.GoTo($"/{_s.OperatorSlug}/adkom/creatives");
+    public void GotoAdkomPop()            => _s.GoTo($"/{_s.OperatorSlug}/adkom/pops");
+    public void GotoMarketplace()         => _s.GoTo($"/{_s.OperatorSlug}/organizations/marketplace-analytics");
+    public void GotoProgrammaticReports() => _s.GoTo($"/{_s.OperatorSlug}/organizations/programmatic/reports");
 }
