@@ -240,6 +240,7 @@ public sealed class BlipScraper {
                 var tag = (SafeAttr(element, "tagName") ?? "").ToLowerInvariant();
                 var width = ParseNullableInt(SafeAttr(element, "naturalWidth")) ?? ParseNullableInt(SafeAttr(element, "width"));
                 var height = ParseNullableInt(SafeAttr(element, "naturalHeight")) ?? ParseNullableInt(SafeAttr(element, "height"));
+                var screenshotBase64 = CaptureElementScreenshot(element);
                 var rawJson = JsonSerializer.Serialize(new {
                     section_id = sectionId,
                     source_url = sourceUrl,
@@ -250,6 +251,7 @@ public sealed class BlipScraper {
                     class_name = SafeAttr(element, "class"),
                     width,
                     height,
+                    screenshot_base64 = screenshotBase64,
                     outer_html = SafeAttr(element, "outerHTML")
                 });
 
@@ -484,6 +486,17 @@ for (const node of nodes) {
         if (string.IsNullOrWhiteSpace(style)) return null;
         var match = Regex.Match(style, @"url\([""']?(?<url>[^)""']+)[""']?\)", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups["url"].Value : null;
+    }
+
+    private static string? CaptureElementScreenshot(IWebElement element) {
+        try {
+            if (element is not ITakesScreenshot shooter) return null;
+            var screenshot = shooter.GetScreenshot();
+            var encoded = screenshot.AsBase64EncodedString;
+            return encoded.Length > 750000 ? null : encoded;
+        } catch {
+            return null;
+        }
     }
 
     private static string? InferTargetSection(string? href, string? label) {

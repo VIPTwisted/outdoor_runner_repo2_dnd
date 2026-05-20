@@ -29,7 +29,7 @@ public sealed class BlipNetworkRecorder {
     if (value === undefined || value === null) return "";
     try {
       var text = typeof value === "string" ? value : JSON.stringify(value);
-      return text.length > 20000 ? text.substring(0, 20000) : text;
+      return text.length > 500000 ? text.substring(0, 500000) : text;
     } catch (err) {
       return "";
     }

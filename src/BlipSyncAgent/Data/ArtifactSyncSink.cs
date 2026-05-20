@@ -1,6 +1,7 @@
 using BlipSyncAgent.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Reflection;
 
 namespace BlipSyncAgent.Data;
 
@@ -47,9 +48,30 @@ public sealed class ArtifactSyncSink : IBlipSyncSink {
         var materialized = rows.ToList();
         var safeName = SafeName.Replace(tableName, "-").Trim('-');
         var path = Path.Combine(_root, "data", $"{safeName}.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(materialized, new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine($"[artifact-sink] wrote {materialized.Count} rows to {path}");
+        var merged = ReadExistingRows<T>(path)
+            .Concat(materialized)
+            .GroupBy(StableRowKey)
+            .Select(group => group.Last())
+            .ToList();
+
+        File.WriteAllText(path, JsonSerializer.Serialize(merged, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"[artifact-sink] wrote {materialized.Count} rows to {path}; merged_total={merged.Count}");
         return Task.CompletedTask;
+    }
+
+    private static IReadOnlyList<T> ReadExistingRows<T>(string path) {
+        if (!File.Exists(path)) return Array.Empty<T>();
+        try {
+            return JsonSerializer.Deserialize<List<T>>(File.ReadAllText(path)) ?? new List<T>();
+        } catch {
+            return Array.Empty<T>();
+        }
+    }
+
+    private static string StableRowKey<T>(T row) {
+        if (row is null) return "";
+        var id = typeof(T).GetProperty("Id", BindingFlags.Instance | BindingFlags.Public)?.GetValue(row)?.ToString();
+        return string.IsNullOrWhiteSpace(id) ? JsonSerializer.Serialize(row) : id;
     }
 
     private static void AppendJsonLine(string path, object value) {

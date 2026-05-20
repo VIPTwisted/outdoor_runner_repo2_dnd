@@ -20,6 +20,7 @@ public sealed class SyncManifestSummary {
     public int PageLinks { get; set; }
     public int MediaAssets { get; set; }
     public int NetworkPayloads { get; set; }
+    public int DetailPages { get; set; }
 
     public int RowsUpserted =>
         DashboardWidgets +
@@ -39,6 +40,12 @@ public sealed class SyncManifestSummary {
 
 public sealed class SyncProcessor {
     private readonly IBlipSyncSink _sink;
+    private readonly Queue<(string sectionId, string url)> _detailQueue = new();
+    private readonly HashSet<string> _visitedUrls = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _queuedUrls = new(StringComparer.OrdinalIgnoreCase);
+
+    private const int MaxDetailPagesPerRun = 80;
+
     public SyncProcessor(IBlipSyncSink sink) { _sink = sink; }
 
     public async Task<SyncManifestSummary> RunWithForensicsAsync(BlipSession blip, string mode, Guid runId) {
@@ -65,6 +72,7 @@ public sealed class SyncProcessor {
         await CaptureAsync("adkom-pop", "GET /adkom/pops", nav.GotoAdkomPop, scraper.ScrapeAdkomPop, _sink.UpsertAdkomPopAsync, count => manifest.AdkomPop = count, manifest, runId, network, scraper);
         await CaptureAsync("marketplace", "GET /organizations/marketplace-analytics", nav.GotoMarketplace, scraper.ScrapeMarketplaceGroups, _sink.UpsertMarketplaceGroupsAsync, count => manifest.MarketplaceGroups = count, manifest, runId, network, scraper);
         await CaptureAsync("programmatic-reports", "GET /organizations/programmatic/reports", nav.GotoProgrammaticReports, scraper.ScrapeProgrammaticReports, _sink.UpsertProgrammaticReportsAsync, count => manifest.ProgrammaticReports = count, manifest, runId, network, scraper);
+        await CrawlDiscoveredDetailPagesAsync(blip, manifest, runId, network, scraper);
 
         if (manifest.RowsUpserted == 0) {
             throw new InvalidOperationException("BLIP login completed, but every documented scrape target returned zero rows. Treating this as a failed sync to prevent false-success drift.");
@@ -119,7 +127,7 @@ public sealed class SyncProcessor {
         var networkEvents = network.Read();
         network.WriteDiagnostics(component, networkEvents);
         assignCount(rows.Count);
-        await PersistMirrorArtifactsAsync(component, scraper, networkEvents, manifest);
+        await PersistMirrorArtifactsAsync(component, scraper, networkEvents, manifest, enqueueDetailLinks: true);
 
         var restCount = networkEvents.Count(evt => evt.Url.Contains("/api/", StringComparison.OrdinalIgnoreCase));
         var graphCount = networkEvents.Count(evt => evt.Url.Contains("/gql", StringComparison.OrdinalIgnoreCase) || evt.Url.Contains("graphql", StringComparison.OrdinalIgnoreCase));
@@ -132,7 +140,41 @@ public sealed class SyncProcessor {
         }
     }
 
-    private async Task PersistMirrorArtifactsAsync(string sectionId, BlipScraper scraper, IReadOnlyList<BlipNetworkEvent> networkEvents, SyncManifestSummary manifest) {
+    private async Task CrawlDiscoveredDetailPagesAsync(
+        BlipSession blip,
+        SyncManifestSummary manifest,
+        Guid runId,
+        BlipNetworkRecorder network,
+        BlipScraper scraper
+    ) {
+        var captured = 0;
+        while (_detailQueue.Count > 0 && captured < MaxDetailPagesPerRun) {
+            var (sectionId, url) = _detailQueue.Dequeue();
+            if (!_visitedUrls.Add(url)) continue;
+
+            var component = $"detail-{sectionId}-{captured + 1}";
+            await _sink.LogEventAsync(runId, "info", "navigate-detail", component, $"GET {url}");
+            network.Clear();
+            blip.GoTo(url);
+            await Task.Delay(2500);
+
+            var networkEvents = network.Read();
+            network.WriteDiagnostics(component, networkEvents);
+            await PersistMirrorArtifactsAsync(component, scraper, networkEvents, manifest, enqueueDetailLinks: true);
+
+            captured++;
+            manifest.DetailPages = captured;
+            await _sink.LogEventAsync(runId, "info", "scrape-detail", component, $"mirrored detail page {captured}/{MaxDetailPagesPerRun}; network events={networkEvents.Count}");
+        }
+
+        if (_detailQueue.Count > 0) {
+            await _sink.LogEventAsync(runId, "warning", "crawl-budget", "detail-crawler", $"detail crawl hit budget={MaxDetailPagesPerRun}; remaining_queue={_detailQueue.Count}");
+        } else {
+            await _sink.LogEventAsync(runId, "info", "crawl-complete", "detail-crawler", $"detail crawl complete; captured={captured}");
+        }
+    }
+
+    private async Task PersistMirrorArtifactsAsync(string sectionId, BlipScraper scraper, IReadOnlyList<BlipNetworkEvent> networkEvents, SyncManifestSummary manifest, bool enqueueDetailLinks) {
         var snapshot = scraper.ScrapePageSnapshot(sectionId);
         var links = scraper.ScrapeLinks(sectionId);
         var media = scraper.ScrapeMediaAssets(sectionId);
@@ -149,6 +191,54 @@ public sealed class SyncProcessor {
         manifest.PageLinks += links.Count;
         manifest.MediaAssets += media.Count;
         manifest.NetworkPayloads += payloads.Count;
+
+        _visitedUrls.Add(NormalizeUrl(snapshot.SourceUrl));
+        if (enqueueDetailLinks) {
+            EnqueueDetailLinks(snapshot.SourceUrl, links);
+        }
+    }
+
+    private void EnqueueDetailLinks(string sourceUrl, IReadOnlyList<ScrapedPageLink> links) {
+        foreach (var link in links) {
+            var url = NormalizeLink(sourceUrl, link.Href);
+            if (url is null) continue;
+            if (!_queuedUrls.Add(url)) continue;
+            if (_visitedUrls.Contains(url)) continue;
+
+            var section = Slugify(link.TargetSection ?? link.Label ?? new Uri(url).AbsolutePath.Trim('/'));
+            _detailQueue.Enqueue((section, url));
+        }
+    }
+
+    private static string? NormalizeLink(string sourceUrl, string href) {
+        if (string.IsNullOrWhiteSpace(href)) return null;
+        if (href.StartsWith("#", StringComparison.OrdinalIgnoreCase)) return null;
+        if (href.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)) return null;
+        if (href.StartsWith("tel:", StringComparison.OrdinalIgnoreCase)) return null;
+        if (href.Contains("logout", StringComparison.OrdinalIgnoreCase)) return null;
+        if (href.Contains("sign_out", StringComparison.OrdinalIgnoreCase)) return null;
+
+        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var sourceUri)) return null;
+        if (!Uri.TryCreate(sourceUri, href, out var uri)) return null;
+        if (!string.Equals(uri.Host, sourceUri.Host, StringComparison.OrdinalIgnoreCase)) return null;
+
+        var normalized = new UriBuilder(uri) { Fragment = "" }.Uri.ToString().TrimEnd('/');
+        if (!normalized.Contains("/" + sourceUri.AbsolutePath.Trim('/').Split('/').FirstOrDefault(), StringComparison.OrdinalIgnoreCase)) {
+            return null;
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeUrl(string url) {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return url.TrimEnd('/');
+        return new UriBuilder(uri) { Fragment = "" }.Uri.ToString().TrimEnd('/');
+    }
+
+    private static string Slugify(string value) {
+        var cleaned = new string(value.ToLowerInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray());
+        while (cleaned.Contains("--", StringComparison.Ordinal)) cleaned = cleaned.Replace("--", "-");
+        return string.IsNullOrWhiteSpace(cleaned.Trim('-')) ? "unknown" : cleaned.Trim('-');
     }
 
     private static ScrapedNetworkPayload ToPayload(string sectionId, string sourceUrl, BlipNetworkEvent evt) {
