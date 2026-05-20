@@ -104,3 +104,49 @@ public sealed class ScrapedNamedRow {
     public string? Format { get; set; }
     public string RawJson { get; set; } = "{}";
 }
+
+public sealed class ScrapedPageSnapshot {
+    public long Id { get; set; }
+    public string SectionId { get; set; } = "";
+    public string SourceUrl { get; set; } = "";
+    public string? Title { get; set; }
+    public string BodyText { get; set; } = "";
+    public int LinkCount { get; set; }
+    public int MediaCount { get; set; }
+    public string RawJson { get; set; } = "{}";
+}
+
+public sealed class ScrapedPageLink {
+    public long Id { get; set; }
+    public string SectionId { get; set; } = "";
+    public string SourceUrl { get; set; } = "";
+    public string Href { get; set; } = "";
+    public string? Label { get; set; }
+    public string? TargetSection { get; set; }
+    public string RawJson { get; set; } = "{}";
+}
+
+public sealed class ScrapedMediaAsset {
+    public long Id { get; set; }
+    public string SectionId { get; set; } = "";
+    public string SourceUrl { get; set; } = "";
+    public string AssetUrl { get; set; } = "";
+    public string AssetType { get; set; } = "";
+    public string? AltText { get; set; }
+    public int? Width { get; set; }
+    public int? Height { get; set; }
+    public string RawJson { get; set; } = "{}";
+}
+
+public sealed class ScrapedNetworkPayload {
+    public long Id { get; set; }
+    public string SectionId { get; set; } = "";
+    public string SourceUrl { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string Method { get; set; } = "";
+    public string Url { get; set; } = "";
+    public int? Status { get; set; }
+    public string ContentType { get; set; } = "";
+    public string BodyPreview { get; set; } = "";
+    public string RawJson { get; set; } = "{}";
+}

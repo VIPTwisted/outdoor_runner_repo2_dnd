@@ -12,6 +12,76 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
     public SupabaseRepository(string connectionString) {
         _conn = new NpgsqlConnection(connectionString);
         _conn.Open();
+        EnsureMirrorTables();
+    }
+
+    private void EnsureMirrorTables() {
+        const string sql = @"
+            create schema if not exists dooh;
+
+            create table if not exists dooh.blip_page_snapshots (
+                id bigint primary key,
+                section_id text not null,
+                source_url text not null,
+                title text,
+                body_text text,
+                link_count integer not null default 0,
+                media_count integer not null default 0,
+                raw jsonb not null default '{}'::jsonb,
+                captured_at timestamptz not null default now(),
+                processed_at timestamptz not null default now()
+            );
+            create index if not exists idx_blip_page_snapshots_section on dooh.blip_page_snapshots(section_id);
+            create index if not exists idx_blip_page_snapshots_captured on dooh.blip_page_snapshots(captured_at desc);
+
+            create table if not exists dooh.blip_discovered_links (
+                id bigint primary key,
+                section_id text not null,
+                source_url text not null,
+                href text not null,
+                label text,
+                target_section text,
+                raw jsonb not null default '{}'::jsonb,
+                captured_at timestamptz not null default now(),
+                processed_at timestamptz not null default now()
+            );
+            create index if not exists idx_blip_discovered_links_section on dooh.blip_discovered_links(section_id);
+            create index if not exists idx_blip_discovered_links_href on dooh.blip_discovered_links(href);
+
+            create table if not exists dooh.blip_media_assets (
+                id bigint primary key,
+                section_id text not null,
+                source_url text not null,
+                asset_url text not null,
+                asset_type text not null,
+                alt_text text,
+                width integer,
+                height integer,
+                raw jsonb not null default '{}'::jsonb,
+                captured_at timestamptz not null default now(),
+                processed_at timestamptz not null default now()
+            );
+            create index if not exists idx_blip_media_assets_section on dooh.blip_media_assets(section_id);
+            create index if not exists idx_blip_media_assets_url on dooh.blip_media_assets(asset_url);
+
+            create table if not exists dooh.blip_network_payloads (
+                id bigint primary key,
+                section_id text not null,
+                source_url text not null,
+                kind text,
+                method text,
+                url text not null,
+                status integer,
+                content_type text,
+                body_preview text,
+                raw jsonb not null default '{}'::jsonb,
+                captured_at timestamptz not null default now(),
+                processed_at timestamptz not null default now()
+            );
+            create index if not exists idx_blip_network_payloads_section on dooh.blip_network_payloads(section_id);
+            create index if not exists idx_blip_network_payloads_url on dooh.blip_network_payloads(url);
+        ";
+        _conn.Execute(sql);
     }
 
     // Atomically claim the next pending row -> status='processing'. Returns null if nothing pending.
@@ -462,6 +532,80 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
                 created = excluded.created,
                 status = excluded.status,
                 format = excluded.format,
+                raw = excluded.raw,
+                processed_at = excluded.processed_at;";
+        foreach (var row in rows) await _conn.ExecuteAsync(sql, row);
+    }
+
+    public async Task UpsertPageSnapshotsAsync(IEnumerable<ScrapedPageSnapshot> rows) {
+        const string sql = @"
+            insert into dooh.blip_page_snapshots
+                (id, section_id, source_url, title, body_text, link_count, media_count, raw, processed_at)
+            values
+                (@Id, @SectionId, @SourceUrl, @Title, @BodyText, @LinkCount, @MediaCount, @RawJson::jsonb, now())
+            on conflict (id) do update set
+                section_id = excluded.section_id,
+                source_url = excluded.source_url,
+                title = excluded.title,
+                body_text = excluded.body_text,
+                link_count = excluded.link_count,
+                media_count = excluded.media_count,
+                raw = excluded.raw,
+                processed_at = excluded.processed_at;";
+        foreach (var row in rows) await _conn.ExecuteAsync(sql, row);
+    }
+
+    public async Task UpsertPageLinksAsync(IEnumerable<ScrapedPageLink> rows) {
+        const string sql = @"
+            insert into dooh.blip_discovered_links
+                (id, section_id, source_url, href, label, target_section, raw, processed_at)
+            values
+                (@Id, @SectionId, @SourceUrl, @Href, @Label, @TargetSection, @RawJson::jsonb, now())
+            on conflict (id) do update set
+                section_id = excluded.section_id,
+                source_url = excluded.source_url,
+                href = excluded.href,
+                label = excluded.label,
+                target_section = excluded.target_section,
+                raw = excluded.raw,
+                processed_at = excluded.processed_at;";
+        foreach (var row in rows) await _conn.ExecuteAsync(sql, row);
+    }
+
+    public async Task UpsertMediaAssetsAsync(IEnumerable<ScrapedMediaAsset> rows) {
+        const string sql = @"
+            insert into dooh.blip_media_assets
+                (id, section_id, source_url, asset_url, asset_type, alt_text, width, height, raw, processed_at)
+            values
+                (@Id, @SectionId, @SourceUrl, @AssetUrl, @AssetType, @AltText, @Width, @Height, @RawJson::jsonb, now())
+            on conflict (id) do update set
+                section_id = excluded.section_id,
+                source_url = excluded.source_url,
+                asset_url = excluded.asset_url,
+                asset_type = excluded.asset_type,
+                alt_text = excluded.alt_text,
+                width = excluded.width,
+                height = excluded.height,
+                raw = excluded.raw,
+                processed_at = excluded.processed_at;";
+        foreach (var row in rows) await _conn.ExecuteAsync(sql, row);
+    }
+
+    public async Task UpsertNetworkPayloadsAsync(IEnumerable<ScrapedNetworkPayload> rows) {
+        const string sql = @"
+            insert into dooh.blip_network_payloads
+                (id, section_id, source_url, kind, method, url, status, content_type, body_preview, raw, processed_at)
+            values
+                (@Id, @SectionId, @SourceUrl, @Kind, @Method, @Url, @Status, @ContentType, @BodyPreview, @RawJson::jsonb, now())
+            on conflict (id) do update set
+                section_id = excluded.section_id,
+                source_url = excluded.source_url,
+                kind = excluded.kind,
+                method = excluded.method,
+                url = excluded.url,
+                status = excluded.status,
+                content_type = excluded.content_type,
+                body_preview = excluded.body_preview,
                 raw = excluded.raw,
                 processed_at = excluded.processed_at;";
         foreach (var row in rows) await _conn.ExecuteAsync(sql, row);

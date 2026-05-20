@@ -38,6 +38,10 @@ public sealed class ArtifactSyncSink : IBlipSyncSink {
     public Task UpsertAdkomPopAsync(IEnumerable<ScrapedAdkomPop> rows) => WriteRows("scraped_adkom_pop", rows);
     public Task UpsertMarketplaceGroupsAsync(IEnumerable<ScrapedNamedRow> rows) => WriteRows("scraped_marketplace_groups", rows);
     public Task UpsertProgrammaticReportsAsync(IEnumerable<ScrapedNamedRow> rows) => WriteRows("scraped_programmatic_reports", rows);
+    public Task UpsertPageSnapshotsAsync(IEnumerable<ScrapedPageSnapshot> rows) => WriteRows("blip_page_snapshots", rows);
+    public Task UpsertPageLinksAsync(IEnumerable<ScrapedPageLink> rows) => WriteRows("blip_discovered_links", rows);
+    public Task UpsertMediaAssetsAsync(IEnumerable<ScrapedMediaAsset> rows) => WriteRows("blip_media_assets", rows);
+    public Task UpsertNetworkPayloadsAsync(IEnumerable<ScrapedNetworkPayload> rows) => WriteRows("blip_network_payloads", rows);
 
     private Task WriteRows<T>(string tableName, IEnumerable<T> rows) {
         var materialized = rows.ToList();

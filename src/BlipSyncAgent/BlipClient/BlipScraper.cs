@@ -167,6 +167,110 @@ public sealed class BlipScraper {
             .ToList();
     }
 
+    public ScrapedPageSnapshot ScrapePageSnapshot(string sectionId) {
+        WaitForPageToSettle();
+        ScrollPage();
+        ScrollScrollableContainers();
+
+        var title = _s.Driver.Title ?? "";
+        var sourceUrl = _s.Driver.Url;
+        var bodyText = Clean(_s.Driver.FindElement(By.TagName("body")).Text);
+        var links = ScrapeLinks(sectionId);
+        var media = ScrapeMediaAssets(sectionId);
+        var rawJson = JsonSerializer.Serialize(new {
+            section_id = sectionId,
+            source_url = sourceUrl,
+            title,
+            body_text = bodyText,
+            links = links.Select(link => new { link.Href, link.Label, link.TargetSection }).ToArray(),
+            media = media.Select(asset => new { asset.AssetUrl, asset.AssetType, asset.AltText, asset.Width, asset.Height }).ToArray()
+        });
+
+        return new ScrapedPageSnapshot {
+            Id = StablePositiveId($"snapshot|{sectionId}|{sourceUrl}"),
+            SectionId = sectionId,
+            SourceUrl = sourceUrl,
+            Title = EmptyToNull(title),
+            BodyText = bodyText,
+            LinkCount = links.Count,
+            MediaCount = media.Count,
+            RawJson = rawJson
+        };
+    }
+
+    public List<ScrapedPageLink> ScrapeLinks(string sectionId) {
+        var sourceUrl = _s.Driver.Url;
+        return _s.Driver.FindElements(By.CssSelector("a[href], button, [role='button'], [data-testid], [aria-label]"))
+            .Select(element => {
+                var href = SafeAttr(element, "href") ?? "";
+                var label = EmptyToNull(Clean(element.Text)) ?? EmptyToNull(SafeAttr(element, "aria-label")) ?? EmptyToNull(SafeAttr(element, "title"));
+                var rawJson = JsonSerializer.Serialize(new {
+                    section_id = sectionId,
+                    source_url = sourceUrl,
+                    href,
+                    label,
+                    tag = SafeAttr(element, "tagName"),
+                    class_name = SafeAttr(element, "class"),
+                    role = SafeAttr(element, "role"),
+                    data_testid = SafeAttr(element, "data-testid"),
+                    aria_label = SafeAttr(element, "aria-label")
+                });
+
+                return new ScrapedPageLink {
+                    Id = StablePositiveId($"link|{sectionId}|{sourceUrl}|{href}|{label}|{rawJson}"),
+                    SectionId = sectionId,
+                    SourceUrl = sourceUrl,
+                    Href = href,
+                    Label = label,
+                    TargetSection = InferTargetSection(href, label),
+                    RawJson = rawJson
+                };
+            })
+            .Where(link => !string.IsNullOrWhiteSpace(link.Href) || !string.IsNullOrWhiteSpace(link.Label))
+            .GroupBy(link => link.Id)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    public List<ScrapedMediaAsset> ScrapeMediaAssets(string sectionId) {
+        var sourceUrl = _s.Driver.Url;
+        return _s.Driver.FindElements(By.CssSelector("img[src], video[src], source[src], canvas, [style*='background-image']"))
+            .Select(element => {
+                var assetUrl = SafeAttr(element, "src") ?? ExtractBackgroundImageUrl(SafeAttr(element, "style")) ?? "";
+                var tag = (SafeAttr(element, "tagName") ?? "").ToLowerInvariant();
+                var width = ParseNullableInt(SafeAttr(element, "naturalWidth")) ?? ParseNullableInt(SafeAttr(element, "width"));
+                var height = ParseNullableInt(SafeAttr(element, "naturalHeight")) ?? ParseNullableInt(SafeAttr(element, "height"));
+                var rawJson = JsonSerializer.Serialize(new {
+                    section_id = sectionId,
+                    source_url = sourceUrl,
+                    asset_url = assetUrl,
+                    tag,
+                    alt = SafeAttr(element, "alt"),
+                    title = SafeAttr(element, "title"),
+                    class_name = SafeAttr(element, "class"),
+                    width,
+                    height,
+                    outer_html = SafeAttr(element, "outerHTML")
+                });
+
+                return new ScrapedMediaAsset {
+                    Id = StablePositiveId($"media|{sectionId}|{sourceUrl}|{assetUrl}|{rawJson}"),
+                    SectionId = sectionId,
+                    SourceUrl = sourceUrl,
+                    AssetUrl = assetUrl,
+                    AssetType = string.IsNullOrWhiteSpace(tag) ? "unknown" : tag,
+                    AltText = EmptyToNull(SafeAttr(element, "alt")) ?? EmptyToNull(SafeAttr(element, "title")),
+                    Width = width,
+                    Height = height,
+                    RawJson = rawJson
+                };
+            })
+            .Where(asset => !string.IsNullOrWhiteSpace(asset.AssetUrl) || asset.AssetType == "canvas")
+            .GroupBy(asset => asset.Id)
+            .Select(group => group.First())
+            .ToList();
+    }
+
     public void WriteDiagnostics(string sectionId) {
         try {
             Directory.CreateDirectory("blip-diagnostics");
@@ -370,6 +474,31 @@ for (const node of nodes) {
 
     private static bool HasAny(params string?[] values) {
         return values.Any(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static int? ParseNullableInt(string? value) {
+        return int.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static string? ExtractBackgroundImageUrl(string? style) {
+        if (string.IsNullOrWhiteSpace(style)) return null;
+        var match = Regex.Match(style, @"url\([""']?(?<url>[^)""']+)[""']?\)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups["url"].Value : null;
+    }
+
+    private static string? InferTargetSection(string? href, string? label) {
+        var haystack = $"{href} {label}".ToLowerInvariant();
+        if (haystack.Contains("available")) return "adkom-availability";
+        if (haystack.Contains("hold")) return "adkom-holds";
+        if (haystack.Contains("contract")) return "adkom-contracts";
+        if (haystack.Contains("creative")) return "adkom-creatives";
+        if (haystack.Contains("pop")) return "adkom-pop";
+        if (haystack.Contains("marketplace")) return "marketplace";
+        if (haystack.Contains("programmatic")) return "programmatic";
+        if (haystack.Contains("sign")) return "plant-signs";
+        if (haystack.Contains("campaign")) return "campaigns";
+        if (haystack.Contains("moderation")) return "ad-moderation";
+        return null;
     }
 
     private static long StablePositiveId(string input) {

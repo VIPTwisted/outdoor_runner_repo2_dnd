@@ -61,7 +61,7 @@ try {
             var proc = new SyncProcessor(repo);
             var manifest = await proc.RunWithForensicsAsync(blip, mode, runId);
             rows = manifest.RowsUpserted;
-            Console.WriteLine($"[BlipSyncAgent] pass completed mode={mode} rows={rows} dashboard={manifest.DashboardWidgets} plant_signs={manifest.PlantSigns} adkom_availability={manifest.AdkomAvailability} adkom_holds={manifest.AdkomHolds} adkom_contracts={manifest.AdkomContracts} adkom_creatives={manifest.AdkomCreatives} adkom_pop={manifest.AdkomPop} marketplace={manifest.MarketplaceGroups} programmatic_reports={manifest.ProgrammaticReports}");
+            Console.WriteLine($"[BlipSyncAgent] pass completed mode={mode} rows={rows} dashboard={manifest.DashboardWidgets} plant_signs={manifest.PlantSigns} adkom_availability={manifest.AdkomAvailability} adkom_holds={manifest.AdkomHolds} adkom_contracts={manifest.AdkomContracts} adkom_creatives={manifest.AdkomCreatives} adkom_pop={manifest.AdkomPop} marketplace={manifest.MarketplaceGroups} programmatic_reports={manifest.ProgrammaticReports} page_snapshots={manifest.PageSnapshots} page_links={manifest.PageLinks} media_assets={manifest.MediaAssets} network_payloads={manifest.NetworkPayloads}");
             await repo.LogEventAsync(runId, "info", "finalize", "agent", "pass completed", manifest);
             await repo.FinishSyncRunAsync(runId, "succeeded", null, rows, manifest);
             return rows;

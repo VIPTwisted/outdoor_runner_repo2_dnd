@@ -13,4 +13,8 @@ public interface IBlipSyncSink {
     Task UpsertAdkomPopAsync(IEnumerable<ScrapedAdkomPop> rows);
     Task UpsertMarketplaceGroupsAsync(IEnumerable<ScrapedNamedRow> rows);
     Task UpsertProgrammaticReportsAsync(IEnumerable<ScrapedNamedRow> rows);
+    Task UpsertPageSnapshotsAsync(IEnumerable<ScrapedPageSnapshot> rows);
+    Task UpsertPageLinksAsync(IEnumerable<ScrapedPageLink> rows);
+    Task UpsertMediaAssetsAsync(IEnumerable<ScrapedMediaAsset> rows);
+    Task UpsertNetworkPayloadsAsync(IEnumerable<ScrapedNetworkPayload> rows);
 }
