@@ -46,7 +46,8 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
                 processed_at timestamptz not null default now()
             );
             create index if not exists idx_blip_discovered_links_section on dooh.blip_discovered_links(section_id);
-            create index if not exists idx_blip_discovered_links_href on dooh.blip_discovered_links(href);
+            drop index if exists dooh.idx_blip_discovered_links_href;
+            create index if not exists idx_blip_discovered_links_href_hash on dooh.blip_discovered_links(md5(href));
 
             create table if not exists dooh.blip_media_assets (
                 id bigint primary key,
@@ -62,7 +63,8 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
                 processed_at timestamptz not null default now()
             );
             create index if not exists idx_blip_media_assets_section on dooh.blip_media_assets(section_id);
-            create index if not exists idx_blip_media_assets_url on dooh.blip_media_assets(asset_url);
+            drop index if exists dooh.idx_blip_media_assets_url;
+            create index if not exists idx_blip_media_assets_url_hash on dooh.blip_media_assets(md5(asset_url));
 
             create table if not exists dooh.blip_network_payloads (
                 id bigint primary key,
@@ -79,7 +81,8 @@ public class SupabaseRepository : IBlipSyncSink, IDisposable {
                 processed_at timestamptz not null default now()
             );
             create index if not exists idx_blip_network_payloads_section on dooh.blip_network_payloads(section_id);
-            create index if not exists idx_blip_network_payloads_url on dooh.blip_network_payloads(url);
+            drop index if exists dooh.idx_blip_network_payloads_url;
+            create index if not exists idx_blip_network_payloads_url_hash on dooh.blip_network_payloads(md5(url));
         ";
         _conn.Execute(sql);
     }
